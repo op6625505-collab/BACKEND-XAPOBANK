@@ -138,25 +138,6 @@ exports.createTransaction = async (req, res) => {
       tx.userName = tx.userName || req.user.name;
     }
 
-    // Enforce identity verification: users must be verified by admin before performing transactions
-    if (req.user && req.user.id) {
-      try {
-        const User = require('../models/User');
-        const requestingUser = await User.findById(req.user.id);
-        if (requestingUser) {
-          // If user is not verified, block creating transactions and give a helpful message.
-          if (!requestingUser.idVerified) {
-            const hasUploaded = !!(requestingUser.passportPath || requestingUser.nationalIdPath);
-            if (hasUploaded) {
-              return res.status(403).json({ isOk: false, error: 'Identity uploaded and pending verification by admin. Transactions are locked until verification is approved.' });
-            } else {
-              return res.status(403).json({ isOk: false, error: 'Please upload a national ID or passport to enable transactions.' });
-            }
-          }
-        }
-      } catch (e) { /* non-fatal - allow flow to continue if user lookup fails */ }
-    }
-
     // ensure a transactionId and default status for new transactions
     tx.transactionId = tx.transactionId || `TXN${Date.now()}`;
     tx.status = tx.status || 'pending';
@@ -596,17 +577,6 @@ exports.updateTransactionStatus = async (req, res) => {
 
 exports.withdrawCollateral = async (req, res) => {
   try {
-    // Ensure user has completed identity verification before allowing collateral withdrawals
-    try {
-      const User = require('../models/User');
-      const checkUser = await User.findById(req.user.id);
-      if (checkUser && !checkUser.idVerified) {
-        const hasUploaded = !!(checkUser.passportPath || checkUser.nationalIdPath);
-        if (hasUploaded) return res.status(403).json({ isOk: false, error: 'Identity uploaded and pending verification by admin. Withdrawals are locked until verification is approved.' });
-        return res.status(403).json({ isOk: false, error: 'Please upload a national ID or passport to enable withdrawals.' });
-      }
-    } catch (e) { /* non-fatal */ }
-
     const { amount, btcAmount } = req.body;
     const userId = req.user.id;
 
