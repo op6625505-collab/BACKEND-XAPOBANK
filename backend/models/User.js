@@ -26,6 +26,9 @@ const UserSchema = new mongoose.Schema({
   membershipPaidAmount: { type: Number, default: 0 },
   membershipPaidAt: { type: Date },
   membershipExpiresAt: { type: Date },
+  activeLoanId: { type: String },
+  activeLoanAmount: { type: Number, default: 0 },
+  activeLoanDueDate: { type: Date },
   // Promo / referral fields
   promoCode: { type: String },
   promoAppliedAt: { type: Date },
