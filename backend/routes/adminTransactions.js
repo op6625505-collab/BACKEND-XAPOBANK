@@ -52,16 +52,22 @@ router.post('/transactions/confirm', adminMiddleware, async (req, res) => {
             const isMembershipTx = (tx.type && tx.type.toLowerCase() === 'membership')
               || (tx.type && tx.type.toLowerCase() === 'deposit' && (tx.amount || 0) >= 1000 && String(tx.description || '').toLowerCase().includes('membership'));
             if (isMembershipTx) {
-              user.isMember = true;
-              user.membershipPaidAmount = tx.amount || user.membershipPaidAmount || 0;
-              user.membershipPaidAt = tx.timestamp ? new Date(tx.timestamp) : new Date();
-              const paidAt = user.membershipPaidAt || new Date();
-              const expires = new Date(paidAt); expires.setFullYear(expires.getFullYear() + 1);
-              user.membershipExpiresAt = expires;
-              try { if (!user.membershipId) user.membershipId = `MBR-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`; } catch(e){ user.membershipId = user.membershipId || `MBR-${Date.now()}`; }
+              // Check if user already has active membership (not expired)
+              if (user.isMember && user.membershipExpiresAt && new Date(user.membershipExpiresAt) > new Date()) {
+                console.warn(`Membership renewal blocked for user ${tx.userId}: existing membership still active until ${user.membershipExpiresAt}`);
+                // Don't prevent the entire transaction confirmation, just skip the membership update
+              } else {
+                user.isMember = true;
+                user.membershipPaidAmount = tx.amount || user.membershipPaidAmount || 0;
+                user.membershipPaidAt = tx.timestamp ? new Date(tx.timestamp) : new Date();
+                const paidAt = user.membershipPaidAt || new Date();
+                const expires = new Date(paidAt); expires.setFullYear(expires.getFullYear() + 1);
+                user.membershipExpiresAt = expires;
+                try { if (!user.membershipId) user.membershipId = `MBR-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`; } catch(e){ user.membershipId = user.membershipId || `MBR-${Date.now()}`; }
+              }
+              await user.save();
+              try { const { emitToUser } = require('../services/socketService'); if (tx.userId) emitToUser(tx.userId, 'user:updated', { id: user._id, savingsBalanceUSD: user.savingsBalanceUSD, collateralBalanceUSD: user.collateralBalanceUSD, collateralBalanceBTC: user.collateralBalanceBTC, isMember: user.isMember }); } catch(e){}
             }
-            await user.save();
-            try { const { emitToUser } = require('../services/socketService'); if (tx.userId) emitToUser(tx.userId, 'user:updated', { id: user._id, savingsBalanceUSD: user.savingsBalanceUSD, collateralBalanceUSD: user.collateralBalanceUSD, collateralBalanceBTC: user.collateralBalanceBTC, isMember: user.isMember }); } catch(e){}
           }
         }
       }
