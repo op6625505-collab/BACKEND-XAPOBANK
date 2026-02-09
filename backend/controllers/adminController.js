@@ -90,6 +90,21 @@ exports.approveTransaction = async (req, res) => {
           // emit updates for loan transaction so frontend refreshes activity/repayments
           try { emitToUser(loanTx.userId, 'transaction:updated', loanTx); } catch (e) {}
           try { emitToAdmins('transaction:updated', loanTx); } catch (e) {}
+          
+          // If loan is fully repaid, clear the user's active loan
+          if (newOutstanding <= 0) {
+            try {
+              const User = require('../models/User');
+              const user = await User.findById(tx.userId);
+              if (user && user.activeLoanId === String(loanTx._id)) {
+                user.activeLoanId = null;
+                user.activeLoanAmount = 0;
+                user.activeLoanDueDate = null;
+                await user.save();
+                try { emitToUser(tx.userId, 'user:updated', { id: user._id, activeLoanId: null, activeLoanAmount: 0, activeLoanDueDate: null }); } catch(e) {}
+              }
+            } catch (e) { console.warn('Failed to clear active loan status:', e && e.message); }
+          }
         }
       }
     } catch (e) { console.warn('Failed to adjust related loan after withdrawal approve', e && e.message); }
@@ -103,6 +118,11 @@ exports.approveTransaction = async (req, res) => {
       if (isMembershipTx && isCompleted && tx.userId) {
         const user = await User.findById(tx.userId);
         if (user) {
+          // Check if user already has active membership (not expired)
+          if (user.isMember && user.membershipExpiresAt && new Date(user.membershipExpiresAt) > new Date()) {
+            console.warn(`Membership renewal blocked for user ${tx.userId}: existing membership still active until ${user.membershipExpiresAt}`);
+            return res.status(400).json({ isOk: false, error: 'User already has an active membership. Cannot renew until expiry.' });
+          }
           user.isMember = true;
           user.membershipPaidAmount = tx.amount || user.membershipPaidAmount || 0;
           user.membershipPaidAt = tx.timestamp ? new Date(tx.timestamp) : new Date();
