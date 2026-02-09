@@ -9,7 +9,7 @@ exports.sendSupport = async (req, res) => {
     const name = (req.user && req.user.name) || req.body.name || 'Anonymous';
     if (!message) return res.status(400).json({ success: false, message: 'Message required' });
 
-    const supportTo = process.env.SUPPORT_EMAIL || process.env.NOTIFY_FROM || 'support@example.com';
+    const supportTo = (config && config.SUPPORT_EMAIL) || process.env.SUPPORT_EMAIL || process.env.NOTIFY_FROM || 'xapoloans@gmail.com';
     const emailSubject = subject || `Support message from ${name}`;
     const html = `<p><strong>From:</strong> ${name} &lt;${from}&gt;</p><p><strong>Message:</strong></p><div>${message.replace(/\n/g, '<br>')}</div>`;
 
