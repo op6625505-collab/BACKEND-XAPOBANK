@@ -107,6 +107,39 @@ async function applyTransactionToUserBalances(tx) {
       // Return updated user for callers that want to emit a full snapshot
       return user;
 
+    } else if (type === 'internal') {
+      // Handle internal transfers (e.g., transfer_to_collateral)
+      const action = String(tx.action || '').toLowerCase();
+      if (action === 'transfer_to_collateral') {
+        // Transfer from btcBalance to collateral
+        const btcAmount = Number(tx.btcAmount || 0);
+        const usdAmount = Number(tx.amount || 0);
+        if (btcAmount > 0) {
+          // Reduce main BTC balance
+          user.btcBalance = Number((Number(user.btcBalance || 0) - btcAmount).toFixed(8));
+          if (user.btcBalance < 0) user.btcBalance = 0;
+          // Increase collateral balances
+          user.collateralBalanceBTC = Number((Number(user.collateralBalanceBTC || 0) + btcAmount).toFixed(8));
+          user.collateralBalanceUSD = Number((Number(user.collateralBalanceUSD || 0) + usdAmount).toFixed(2));
+        }
+        await user.save();
+        tx.appliedToBalances = true;
+        await tx.save();
+        // Emit user:updated socket event with updated balances
+        try {
+          const { emitToUser } = require('../services/socketService');
+          if (tx.userId) {
+            emitToUser(tx.userId, 'user:updated', {
+              id: user._id,
+              btcBalance: user.btcBalance,
+              collateralBalanceUSD: user.collateralBalanceUSD,
+              collateralBalanceBTC: user.collateralBalanceBTC,
+              savingsBalanceUSD: user.savingsBalanceUSD
+            });
+          }
+        } catch (e) { console.debug('Socket emit failed for transfer_to_collateral', e && e.message); }
+        return user;
+      }
     }
   } catch (e) { console.warn('applyTransactionToUserBalances failed', e && e.message); }
 }
@@ -130,6 +163,21 @@ exports.createTransaction = async (req, res) => {
       const User = require('../models/User');
       const user = await User.findById(req.user.id);
       if (!user || !user.isMember) return res.status(403).json({ isOk: false, error: 'Loan access restricted to members' });
+      
+      // Check if user already has an active unpaid loan
+      if (user.activeLoanId) {
+        try {
+          const existingLoan = await Transaction.findById(user.activeLoanId);
+          if (existingLoan) {
+            const outstandingAmount = Number(existingLoan.loanAmount || existingLoan.amount || 0);
+            if (outstandingAmount > 0) {
+              return res.status(400).json({ isOk: false, error: `You have an active loan with outstanding amount. Please repay your loan before borrowing again.`, activeLoanAmount: outstandingAmount });
+            }
+          }
+        } catch (e) {
+          console.warn('Error checking active loan:', e && e.message);
+        }
+      }
     }
     // If user is authenticated, attach user info
     if (req.user) {
@@ -171,6 +219,11 @@ exports.createTransaction = async (req, res) => {
         const User = require('../models/User');
         const user = await User.findById(req.user.id);
         if (!user) return res.status(404).json({ isOk: false, error: 'User not found' });
+
+        // Check if user already has active membership (not expired)
+        if (user.isMember && user.membershipExpiresAt && new Date(user.membershipExpiresAt) > new Date()) {
+          return res.status(400).json({ isOk: false, error: 'You already have an active membership. Please wait until it expires to renew.' });
+        }
 
         const amountUsd = Number(safeTx.amount || 0);
         const fallbackPrice = Number(process.env.BITCOIN_PRICE || 42000);
@@ -291,6 +344,26 @@ exports.createTransaction = async (req, res) => {
         }
       } catch (e) {
         console.warn('Membership update failed:', e && e.message);
+      }
+      // Handle loan creation - track active loan
+      try {
+        const User = require('../models/User');
+        const status = String(created.status || '').toLowerCase();
+        const isCompleted = status === 'completed' || status === 'confirmed' || status === 'complete';
+        const isLoanTx = created.type && created.type.toLowerCase() === 'loan';
+        if (isLoanTx && isCompleted && created.userId) {
+          const user = await User.findById(created.userId);
+          if (user) {
+            user.activeLoanId = String(created._id || created.id);
+            user.activeLoanAmount = Number(created.loanAmount || created.amount || 0);
+            user.activeLoanDueDate = created.dueDate || created.repaymentDate;
+            await user.save();
+            // notify the user's sockets about active loan
+            emitToUser(created.userId, 'user:updated', { id: user._id, activeLoanId: user.activeLoanId, activeLoanAmount: user.activeLoanAmount, activeLoanDueDate: user.activeLoanDueDate });
+          }
+        }
+      } catch (e) {
+        console.warn('Loan tracking update failed:', e && e.message);
       }
       // If the transaction is already completed, apply balance updates immediately
       try {
