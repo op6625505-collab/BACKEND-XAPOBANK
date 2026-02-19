@@ -15,6 +15,7 @@ router.post('/2fa-enable', authMiddleware, authController.enableTwoFactor);
 router.post('/2fa-disable', authMiddleware, authController.disableTwoFactor);
 router.patch('/me', authMiddleware, validateProfile, authController.updateProfile);
 router.delete('/delete-account', authMiddleware, authController.deleteAccount);
+router.post('/verify-identity', authMiddleware, authController.verifyIdentity);
 
 
 
