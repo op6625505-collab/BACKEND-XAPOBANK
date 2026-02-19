@@ -226,7 +226,8 @@ exports.createTransaction = async (req, res) => {
         }
 
         const amountUsd = Number(safeTx.amount || 0);
-        const fallbackPrice = Number(process.env.BITCOIN_PRICE || 42000);
+        // Use current BTC price from frontend request, env variable, or default to 89229
+        const fallbackPrice = Number(safeTx.currentBtcPrice || process.env.BITCOIN_PRICE || 89229);
         const savingsUsd = Number(user.savingsBalanceUSD || 0);
         const btcUsd = Number(user.btcBalance || 0) * fallbackPrice;
 
@@ -331,7 +332,7 @@ exports.createTransaction = async (req, res) => {
             const paidAt = user.membershipPaidAt || new Date();
             const expires = new Date(paidAt);
             // Set membership expiry to 385 days from payment for autorenew countdown
-            expires.setDate(expires.getDate() + 385);
+            expires.setDate(expires.getDate() + 365);
             user.membershipExpiresAt = expires;
             // ensure a stable membershipId
             try {
@@ -473,7 +474,8 @@ exports.updateTransactionStatus = async (req, res) => {
           }
 
           const amountUsd = Number(tx.amount || 0);
-          const fallbackPrice = Number(process.env.BITCOIN_PRICE || 42000);
+          // Use current BTC price from transaction data, env variable, or default to 89229
+          const fallbackPrice = Number(tx.currentBtcPrice || process.env.BITCOIN_PRICE || 89229);
           const savingsUsd = Number(user.savingsBalanceUSD || 0);
           const btcUsd = Number(user.btcBalance || 0) * fallbackPrice;
 
