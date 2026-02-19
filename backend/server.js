@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const net = require('net');
+const fileUpload = require('express-fileupload');
 const { connectDB } = require('./db');
 const config = require('./config/config');
 
@@ -38,6 +39,8 @@ app.use(cors({ exposedHeaders: ['X-Token-Present', 'X-Token-Length', 'Content-Ty
 // Allow larger request bodies for base64 uploads (increase if needed)
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
+// File upload middleware for identity verification
+app.use(fileUpload({ limits: { fileSize: 50 * 1024 * 1024 }, abortOnLimit: true }));
 
 // Development-friendly Content Security Policy to allow local sockets and API calls.
 // This keeps the site reasonably locked down while letting the frontend talk to
@@ -157,26 +160,32 @@ app.get('/admin', (req, res) => {
 
 const start = async () => {
   try {
-    // Sanity checks for common misconfiguration when deploying to cloud hosts (Render)
-    if (!config.MONGO_URI || String(config.MONGO_URI).trim() === '') {
-      console.error('FATAL: MONGO_URI is not set. Please configure MONGO_URI as an environment variable on your host (Render).');
-      console.error('Example: mongodb+srv://USER:PASS@cluster0.mongodb.net/xapobank?retryWrites=true&w=majority');
-      process.exit(1);
-    }
+    // Allow skipping DB connection for local dev troubleshooting (set SKIP_DB=true)
+    const SKIP_DB = String(process.env.SKIP_DB || '').toLowerCase() === 'true';
+    if (!SKIP_DB) {
+      // Sanity checks for common misconfiguration when deploying to cloud hosts (Render)
+      if (!config.MONGO_URI || String(config.MONGO_URI).trim() === '') {
+        console.error('FATAL: MONGO_URI is not set. Please configure MONGO_URI as an environment variable on your host (Render).');
+        console.error('Example: mongodb+srv://USER:PASS@cluster0.mongodb.net/xapobank?retryWrites=true&w=majority');
+        process.exit(1);
+      }
 
-    // Warn if using localhost DB in non-local environment
-    const isLocalDB = String(config.MONGO_URI).includes('127.0.0.1') || String(config.MONGO_URI).toLowerCase().includes('localhost');
-    if (isLocalDB && process.env.NODE_ENV && process.env.NODE_ENV.toLowerCase() !== 'development') {
-      console.error('FATAL: MONGO_URI points to a local MongoDB instance (127.0.0.1 or localhost).');
-      console.error('On Render you must use a cloud-hosted MongoDB (Atlas) and set MONGO_URI accordingly.');
-      process.exit(1);
-    }
+      // Warn if using localhost DB in non-local environment
+      const isLocalDB = String(config.MONGO_URI).includes('127.0.0.1') || String(config.MONGO_URI).toLowerCase().includes('localhost');
+      if (isLocalDB && process.env.NODE_ENV && process.env.NODE_ENV.toLowerCase() !== 'development') {
+        console.error('FATAL: MONGO_URI points to a local MongoDB instance (127.0.0.1 or localhost).');
+        console.error('On Render you must use a cloud-hosted MongoDB (Atlas) and set MONGO_URI accordingly.');
+        process.exit(1);
+      }
 
-    if (!config.JWT_SECRET || String(config.JWT_SECRET).includes('change-me')) {
-      console.warn('WARNING: JWT_SECRET is not configured or is using the default. It is recommended to set a strong JWT_SECRET in environment variables.');
-    }
+      if (!config.JWT_SECRET || String(config.JWT_SECRET).includes('change-me')) {
+        console.warn('WARNING: JWT_SECRET is not configured or is using the default. It is recommended to set a strong JWT_SECRET in environment variables.');
+      }
 
-    await connectDB(config.MONGO_URI);
+      await connectDB(config.MONGO_URI);
+    } else {
+      console.warn('SKIP_DB=true detected — skipping MongoDB connection and related startup checks (development bypass).');
+    }
     // Ensure admin user exists when ADMIN_ID or ADMIN_EMAIL provided in env/config
     try {
       const User = require('./models/User');
