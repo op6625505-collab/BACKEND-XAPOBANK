@@ -336,10 +336,19 @@ exports.disableTwoFactor = async (req, res) => {
 exports.verifyIdentity = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { idType } = req.body;
+    // Try to get idType from req.body first, then from req.fields, then from req.body directly
+    let idType = req.body.idType || req.fields?.idType || req.body?.idType;
+
+    console.log('=== VERIFY IDENTITY DEBUG ===');
+    console.log('User ID:', userId);
+    console.log('req.body:', req.body);
+    console.log('req.fields:', req.fields);
+    console.log('req.files keys:', req.files ? Object.keys(req.files) : 'No files');
+    console.log('idType value:', idType);
 
     // Validate idType
     if (!idType || !['national_id', 'passport'].includes(idType)) {
+      console.log('IdType validation failed. Expected: national_id or passport, received:', idType);
       return res.status(400).json({ success: false, message: 'Invalid ID type' });
     }
 
