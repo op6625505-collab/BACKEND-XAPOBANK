@@ -332,3 +332,91 @@ exports.disableTwoFactor = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
+exports.verifyIdentity = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { idType } = req.body;
+
+    // Validate idType
+    if (!idType || !['national_id', 'passport'].includes(idType)) {
+      return res.status(400).json({ success: false, message: 'Invalid ID type' });
+    }
+
+    // Check if files are provided: require idDocument and either a selfie photo or a video
+    if (!req.files || !req.files.idDocument || (!req.files.verificationVideo && !req.files.verificationPhoto)) {
+      return res.status(400).json({ success: false, message: 'ID document and a selfie (or short video) are required' });
+    }
+
+    const idDocument = req.files.idDocument;
+    const verificationVideo = req.files.verificationVideo;
+    const verificationPhoto = req.files.verificationPhoto;
+
+    // Validate file sizes
+    if (idDocument.size > 5 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'ID document must be less than 5MB' });
+    }
+
+    if (verificationPhoto && verificationPhoto.size > 5 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'Selfie photo must be less than 5MB' });
+    }
+
+    if (verificationVideo && verificationVideo.size > 20 * 1024 * 1024) {
+      return res.status(400).json({ success: false, message: 'Video must be less than 20MB' });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+
+    // Store file upload info with timestamp
+    const uploadsDir = path.join(__dirname, '..', 'uploads');
+    const timestamp = Date.now();
+    const idDocFileName = `${userId}_${idType}_${timestamp}`;
+    const mediaFileName = `${userId}_media_${timestamp}`;
+
+    try {
+      // Save ID document
+      const idDocPath = path.join(uploadsDir, idDocFileName);
+      await idDocument.mv(idDocPath);
+
+      // Save selfie photo or video (prefer photo)
+      let savedMediaName = null;
+      if (verificationPhoto) {
+        const photoPath = path.join(uploadsDir, mediaFileName);
+        await verificationPhoto.mv(photoPath);
+        savedMediaName = mediaFileName;
+      } else if (verificationVideo) {
+        const videoPath = path.join(uploadsDir, mediaFileName);
+        await verificationVideo.mv(videoPath);
+        savedMediaName = mediaFileName;
+      }
+
+      // Update user with verification info (but not verified yet - awaiting admin)
+      user.idUploadedAt = new Date();
+      user.idVerified = false; // Will be set to true only after admin verification
+
+      // Store file paths for admin verification
+      if (idType === 'passport') user.passportPath = idDocFileName;
+      else user.nationalIdPath = idDocFileName;
+
+      if (savedMediaName) user.livePhotoPath = savedMediaName;
+
+      await user.save();
+
+      console.log(`Identity verification documents submitted for user: ${user.email}`);
+      return res.json({ 
+        success: true, 
+        message: 'Identity documents submitted successfully. Admin will review and verify your identity.',
+        data: { userId: user._id, uploadedAt: user.idUploadedAt }
+      });
+    } catch (fileError) {
+      console.error('File save error:', fileError);
+      return res.status(500).json({ success: false, message: 'Failed to save files. Please try again.' });
+    }
+  } catch (err) {
+    console.error('Verify identity error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
