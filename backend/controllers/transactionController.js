@@ -164,6 +164,9 @@ exports.createTransaction = async (req, res) => {
       const user = await User.findById(req.user.id);
       if (!user || !user.isMember) return res.status(403).json({ isOk: false, error: 'Loan access restricted to members' });
       
+      // Check if user has verified their identity
+      if (!user.idVerified) return res.status(403).json({ isOk: false, error: 'Identity verification required to apply for loans' });
+      
       // Check if user already has an active unpaid loan
       if (user.activeLoanId) {
         try {
@@ -666,6 +669,11 @@ exports.withdrawCollateral = async (req, res) => {
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ isOk: false, error: 'User not found' });
+    }
+
+    // Check if user has verified their identity
+    if (!user.idVerified) {
+      return res.status(403).json({ isOk: false, error: 'Identity verification required to withdraw funds' });
     }
 
     // Check if user has sufficient collateral in both USD and BTC
