@@ -84,9 +84,12 @@ router.post('/user/:id/loan', async (req, res) => {
       return res.json({ ok: true, data: { idVerified: user.idVerified } });
     } else if (String(action).toLowerCase() === 'reject') {
       user.idVerified = false;
-      // Optionally remove uploaded files or mark as rejected
+      // mark as rejected with optional reason and timestamp
+      user.idRejectedAt = new Date();
+      user.idRejectedReason = (req.body && req.body.reason) ? String(req.body.reason) : 'Document not clear or not valid';
+      // Optionally remove uploaded files or keep them for reference
       await user.save();
-      return res.json({ ok: true, data: { idVerified: user.idVerified } });
+      return res.json({ ok: true, data: { idVerified: user.idVerified, idRejectedAt: user.idRejectedAt, idRejectedReason: user.idRejectedReason } });
     } else {
       return res.status(400).json({ ok: false, error: 'Unknown action' });
     }
