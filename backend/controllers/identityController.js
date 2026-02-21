@@ -11,19 +11,21 @@ exports.upload = async (req, res) => {
 
     // Prefer multipart file upload (multer) when available: req.file
     let filename = null;
+    let type = 'passport';
     if (req.file && req.file.buffer) {
       // Determine extension from mimetype or originalname
       const mime = String(req.file.mimetype || '').toLowerCase();
       let ext = 'jpg';
       if (mime && mime.indexOf('/') !== -1) ext = mime.split('/')[1];
       else if (req.file.originalname && req.file.originalname.indexOf('.') !== -1) ext = req.file.originalname.split('.').pop();
-      const type = req.body.type || 'passport';
+      type = req.body.type || 'passport';
       filename = `${type}_${req.user.id}_${Date.now()}.${ext}`;
       const filepath = path.join(uploadsDir, filename);
       fs.writeFileSync(filepath, req.file.buffer);
     } else {
       // Fallback: expect base64 payload in JSON { type, data }
-      const { type, data } = req.body;
+      const { data } = req.body || {};
+      type = (req.body && req.body.type) ? req.body.type : type;
       if (!type || !data) return res.status(400).json({ success: false, message: 'type and data are required' });
       // data may be a data URL like 'data:image/jpeg;base64,...' or raw base64
       let matches = String(data).match(/^data:(image\/\w+);base64,(.+)$/);
