@@ -382,8 +382,24 @@ exports.verifyIdentity = async (req, res) => {
     // Store file upload info with timestamp
     const uploadsDir = path.join(__dirname, '..', 'uploads');
     const timestamp = Date.now();
-    const idDocFileName = `${userId}_${idType}_${timestamp}`;
-    const mediaFileName = `${userId}_media_${timestamp}`;
+    // Preserve extension when saving so static server can set proper MIME types
+    const guessExt = (file) => {
+      try {
+        if (!file) return '';
+        const original = file.name || '';
+        const ext = path.extname(original || '').replace(/^\./, '');
+        if (ext) return ext;
+        // Fallback to mimetype
+        const m = (file.mimetype || '').split('/')[1];
+        return m || '';
+      } catch (e) { return ''; }
+    };
+
+    const idExt = guessExt(idDocument) || 'jpg';
+    const mediaExt = guessExt(verificationPhoto || verificationVideo) || 'jpg';
+
+    const idDocFileName = `${userId}_${idType}_${timestamp}.${idExt}`;
+    const mediaFileName = `${userId}_media_${timestamp}.${mediaExt}`;
 
     try {
       // Save ID document
@@ -406,11 +422,11 @@ exports.verifyIdentity = async (req, res) => {
       user.idUploadedAt = new Date();
       user.idVerified = false; // Will be set to true only after admin verification
 
-      // Store file paths for admin verification
-      if (idType === 'passport') user.passportPath = idDocFileName;
-      else user.nationalIdPath = idDocFileName;
+      // Store file paths for admin verification (include /uploads/ prefix so admin UI can build full URLs)
+      if (idType === 'passport') user.passportPath = `/uploads/${idDocFileName}`;
+      else user.nationalIdPath = `/uploads/${idDocFileName}`;
 
-      if (savedMediaName) user.livePhotoPath = savedMediaName;
+      if (savedMediaName) user.livePhotoPath = `/uploads/${savedMediaName}`;
 
       await user.save();
 
