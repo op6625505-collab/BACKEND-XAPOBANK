@@ -240,6 +240,11 @@ exports.changePassword = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
+    // If already verified, reject new verification submissions
+    if (user.idVerified) {
+      return res.status(400).json({ success: false, message: 'Identity already verified - no further uploads allowed' });
+    }
+
     // Verify current password
     const isPasswordValid = await comparePassword(currentPassword, user.passwordHash);
     if (!isPasswordValid) {
