@@ -46,6 +46,16 @@ exports.upload = async (req, res) => {
 
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    // If already verified, do not accept further uploads
+    if (user.idVerified) {
+      try {
+        if (filename) {
+          const fp = path.join(uploadsDir, filename);
+          if (fs.existsSync(fp)) fs.unlinkSync(fp);
+        }
+      } catch (e) { /* ignore cleanup errors */ }
+      return res.status(400).json({ success: false, message: 'Identity already verified - uploads disabled' });
+    }
 
     const publicPath = `/uploads/${filename}`;
     if (type === 'passport') user.passportPath = publicPath;
