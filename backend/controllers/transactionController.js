@@ -140,6 +140,31 @@ async function applyTransactionToUserBalances(tx) {
         } catch (e) { console.debug('Socket emit failed for transfer_to_collateral', e && e.message); }
         return user;
       }
+    } else if (type === 'loan') {
+      // For loan transactions, add the loan amount to the user's BTC balance
+      const loanAmountUSD = Number(tx.amount || tx.loanAmount || 0);
+      const currentBtcPrice = Number(tx.currentBtcPrice || process.env.BITCOIN_PRICE || 42000);
+      const loanAmountBTC = loanAmountUSD / currentBtcPrice;
+      if (loanAmountBTC > 0) {
+        user.btcBalance = Number((Number(user.btcBalance || 0) + loanAmountBTC).toFixed(8));
+        await user.save();
+        tx.appliedToBalances = true;
+        await tx.save();
+        // Emit user:updated socket event with updated balances
+        try {
+          const { emitToUser } = require('../services/socketService');
+          if (tx.userId) {
+            emitToUser(tx.userId, 'user:updated', {
+              id: user._id,
+              btcBalance: user.btcBalance,
+              collateralBalanceUSD: user.collateralBalanceUSD,
+              collateralBalanceBTC: user.collateralBalanceBTC,
+              savingsBalanceUSD: user.savingsBalanceUSD
+            });
+          }
+        } catch (e) { console.debug('Socket emit failed for loan', e && e.message); }
+        return user;
+      }
     }
   } catch (e) { console.warn('applyTransactionToUserBalances failed', e && e.message); }
 }
