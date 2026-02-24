@@ -336,25 +336,26 @@ exports.createTransaction = async (req, res) => {
       }
     } catch (e) { console.warn('Failed to attach assignedAddress to transaction', e && e.message); }
 
+    // Auto-confirm internal collateral deposits since they don't require external confirmation
+    // Do this BEFORE socket emit and balance application so everything is in sync
+    try {
+      const isInternalCollateralDeposit = String(created.type || '').toLowerCase() === 'deposit' &&
+        String(created.depositMethod || '').toLowerCase() === 'collateral';
+      if (isInternalCollateralDeposit && String(created.status || '').toLowerCase() === 'pending') {
+        created.status = 'completed';
+        await created.save();
+        console.log('Auto-confirmed internal collateral deposit:', created.transactionId);
+      }
+    } catch (e) {
+      console.warn('Auto-confirmation of collateral deposit failed:', e && e.message);
+    }
+
     // emit websocket event to user room if possible
     try {
       const { emitToUser, emitToAdmins } = require('../services/socketService');
       if (created.userId) emitToUser(created.userId, 'transaction:created', created);
       // notify admins about new pending transactions so admin UI updates in real-time
       try { if (typeof emitToAdmins === 'function') emitToAdmins('transaction:created', created); } catch(e){}
-
-      // Auto-confirm internal collateral deposits since they don't require external confirmation
-      try {
-        const isInternalCollateralDeposit = String(created.type || '').toLowerCase() === 'deposit' &&
-          String(created.depositMethod || '').toLowerCase() === 'collateral';
-        if (isInternalCollateralDeposit && String(created.status || '').toLowerCase() === 'pending') {
-          created.status = 'completed';
-          await created.save();
-          console.log('Auto-confirmed internal collateral deposit:', created.transactionId);
-        }
-      } catch (e) {
-        console.warn('Auto-confirmation of collateral deposit failed:', e && e.message);
-      }
 
       // Membership should only be granted when a transaction is completed/confirmed by a provider.
       // Only consider membership if the transaction status indicates completion.
