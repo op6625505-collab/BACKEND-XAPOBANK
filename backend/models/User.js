@@ -18,6 +18,8 @@ const UserSchema = new mongoose.Schema({
   idUploadedAt: { type: Date },
   // Persisted balances
   savingsBalanceUSD: { type: Number, default: 0 },
+  // USD balance representing 'bank' savings converted from BTC
+  usdBalance: { type: Number, default: 0 },
   collateralBalanceUSD: { type: Number, default: 0 },
   collateralBalanceBTC: { type: Number, default: 0 },
   btcBalance: { type: Number, default: 0 },
