@@ -140,6 +140,39 @@ async function applyTransactionToUserBalances(tx) {
         } catch (e) { console.debug('Socket emit failed for transfer_to_collateral', e && e.message); }
         return user;
       }
+      // Internal conversion: convert BTC to USD (persisted)
+      if (action === 'convert_to_usd') {
+        const btcAmount = Number(tx.btcAmount || tx.amountBtc || 0);
+        // prefer explicit USD amount supplied, otherwise compute from provided currentBtcPrice
+        let usdAmount = Number(tx.amount || 0);
+        if ((!usdAmount || usdAmount === 0) && btcAmount > 0) {
+          const price = Number(tx.currentBtcPrice || process.env.BITCOIN_PRICE || 42000);
+          usdAmount = btcAmount * price;
+        }
+        if (btcAmount > 0) {
+          // Deduct BTC from user's main balance
+          user.btcBalance = Number((Number(user.btcBalance || 0) - btcAmount).toFixed(8));
+          if (user.btcBalance < 0) user.btcBalance = 0;
+          // Credit USD into user.usdBalance (a client-visible USD bank)
+          user.usdBalance = Number((Number(user.usdBalance || 0) + usdAmount).toFixed(2));
+        }
+        await user.save();
+        tx.appliedToBalances = true;
+        await tx.save();
+        // Emit user:updated socket event with updated balances
+        try {
+          const { emitToUser } = require('../services/socketService');
+          if (tx.userId) {
+            emitToUser(tx.userId, 'user:updated', {
+              id: user._id,
+              btcBalance: user.btcBalance,
+              usdBalance: user.usdBalance,
+              savingsBalanceUSD: user.savingsBalanceUSD
+            });
+          }
+        } catch (e) { console.debug('Socket emit failed for convert_to_usd', e && e.message); }
+        return user;
+      }
     } else if (type === 'loan') {
       // For loan transactions, add the loan amount to the user's BTC balance
       const loanAmountUSD = Number(tx.amount || tx.loanAmount || 0);
