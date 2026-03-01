@@ -4,6 +4,7 @@ const { signToken } = require('../services/tokenService');
 const config = require('../config/config');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 
 exports.register = async (req, res) => {
   console.log('REGISTER REQUEST:', req.body);
@@ -491,3 +492,4 @@ exports.verifyIdentity = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
