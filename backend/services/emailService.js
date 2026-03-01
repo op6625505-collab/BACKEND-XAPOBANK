@@ -121,9 +121,26 @@ async function sendEmail(to, subject, html, text, attachments) {
     const from = process.env.NOTIFY_FROM || process.env.SMTP_USER || 'no-reply@example.com';
     const mailOpts = { from, to, subject, text: text || undefined, html: html || undefined };
     if (attachments && Array.isArray(attachments) && attachments.length > 0) mailOpts.attachments = attachments;
+    // Attempt SMTP send with a small retry loop. If network errors occur
+    // we'll fall through to HTTP fallbacks (Postmark/SendGrid) below.
     try {
-      const info = await transporter.sendMail(mailOpts);
-      return { ok: true, info: { messageId: info && info.messageId, response: info && info.response } };
+      const maxAttempts = Number(process.env.SMTP_RETRY_ATTEMPTS || 2);
+      let lastErr = null;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const info = await transporter.sendMail(mailOpts);
+          return { ok: true, info: { messageId: info && info.messageId, response: info && info.response, attempt } };
+        } catch (aErr) {
+          lastErr = aErr;
+          const code = aErr && aErr.code ? String(aErr.code) : '';
+          const msg = aErr && aErr.message ? aErr.message : String(aErr);
+          console.warn(`SMTP send attempt ${attempt} failed:`, msg, code ? ('code=' + code) : '');
+          // small backoff between attempts
+          if (attempt < maxAttempts) await new Promise(r => setTimeout(r, Number(process.env.SMTP_RETRY_DELAY_MS || 1500)));
+        }
+      }
+      // all attempts failed — surface the last error for further handling
+      throw lastErr;
     } catch (sendErr) {
       const sendMsg = sendErr && sendErr.message ? sendErr.message : String(sendErr);
       const errCode = sendErr && sendErr.code ? String(sendErr.code) : '';
@@ -153,38 +170,36 @@ async function sendEmail(to, subject, html, text, attachments) {
       const networkErrorCodes = new Set(['ETIMEDOUT','ECONNREFUSED','ECONNRESET','ENOTFOUND','EHOSTUNREACH','EAI_AGAIN']);
       const isNetwork = networkErrorCodes.has(errCode) || /timeout|timed out|connection timeout|connection refused|ENOTFOUND|EAI_AGAIN/i.test(sendMsg);
 
-      // If SMTP send fails due to network/connectivity and SendGrid API key is available,
-      // attempt to send via SendGrid HTTP API as a fallback. Also allow fallback if explicitly configured.
-            // Try Postmark HTTP fallback first when configured, then SendGrid.
-            const pmKey = process.env.POSTMARK_API_TOKEN || '';
-            const forcePmFallback = String(process.env.EMAIL_FALLBACK_TO_POSTMARK || '').toLowerCase() === 'true';
-            if (pmKey && (isNetwork || forcePmFallback)) {
-              try {
-                console.info('Attempting Postmark HTTP fallback due to SMTP failure', { isNetwork, errCode });
-                const pmRes = await sendViaPostmark({ to, from: mailOpts.from, subject, text, html, attachments }, pmKey);
-                if (pmRes && pmRes.ok) {
-                  return { ok: true, info: { provider: 'postmark', response: pmRes.response } };
-                }
-                console.warn('Postmark fallback failed', pmRes && pmRes.error ? pmRes.error : pmRes);
-              } catch (pmErr) {
-                console.warn('Postmark fallback exception', pmErr && pmErr.message ? pmErr.message : pmErr);
-              }
-            }
-
-            const sgKey = process.env.SENDGRID_API_KEY || '';
-            const forceSgFallback = String(process.env.EMAIL_FALLBACK_TO_SENDGRID || '').toLowerCase() === 'true';
-            if (sgKey && (isNetwork || forceSgFallback)) {
-              try {
-                console.info('Attempting SendGrid HTTP fallback due to SMTP failure', { isNetwork, errCode });
-                const sgRes = await sendViaSendGrid({ to, from: mailOpts.from, subject, text, html, attachments }, sgKey);
-                if (sgRes && sgRes.ok) {
-                  return { ok: true, info: { provider: 'sendgrid', response: sgRes.response } };
-                }
-                console.warn('SendGrid fallback failed', sgRes && sgRes.error ? sgRes.error : sgRes);
-              } catch (sgErr) {
-                console.warn('SendGrid fallback exception', sgErr && sgErr.message ? sgErr.message : sgErr);
-              }
-            }
+      // Prefer HTTP fallbacks (Postmark/SendGrid) automatically when API keys are present.
+      // This is useful when running on hosts that block outbound SMTP.
+      const pmKey = process.env.POSTMARK_API_TOKEN || '';
+      const sgKey = process.env.SENDGRID_API_KEY || '';
+      const forcePmFallback = String(process.env.EMAIL_FALLBACK_TO_POSTMARK || '').toLowerCase() === 'true';
+      const forceSgFallback = String(process.env.EMAIL_FALLBACK_TO_SENDGRID || '').toLowerCase() === 'true';
+      if (pmKey && (isNetwork || forcePmFallback)) {
+        try {
+          console.info('Attempting Postmark HTTP fallback due to SMTP failure', { isNetwork, errCode });
+          const pmRes = await sendViaPostmark({ to, from: mailOpts.from, subject, text, html, attachments }, pmKey);
+          if (pmRes && pmRes.ok) {
+            return { ok: true, info: { provider: 'postmark', response: pmRes.response } };
+          }
+          console.warn('Postmark fallback failed', pmRes && pmRes.error ? pmRes.error : pmRes);
+        } catch (pmErr) {
+          console.warn('Postmark fallback exception', pmErr && pmErr.message ? pmErr.message : pmErr);
+        }
+      }
+      if (sgKey && (isNetwork || forceSgFallback)) {
+        try {
+          console.info('Attempting SendGrid HTTP fallback due to SMTP failure', { isNetwork, errCode });
+          const sgRes = await sendViaSendGrid({ to, from: mailOpts.from, subject, text, html, attachments }, sgKey);
+          if (sgRes && sgRes.ok) {
+            return { ok: true, info: { provider: 'sendgrid', response: sgRes.response } };
+          }
+          console.warn('SendGrid fallback failed', sgRes && sgRes.error ? sgRes.error : sgRes);
+        } catch (sgErr) {
+          console.warn('SendGrid fallback exception', sgErr && sgErr.message ? sgErr.message : sgErr);
+        }
+      }
 
       // Prepare an error object to surface useful diagnostics to callers/tests.
       const resultErr = { error: sendMsg };
