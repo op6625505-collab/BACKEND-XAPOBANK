@@ -130,6 +130,25 @@ async function sendEmail(to, subject, html, text, attachments) {
       console.error('sendEmail sendMail error', sendMsg, errCode ? ('code=' + errCode) : '');
       if (emailDebug && sendErr && sendErr.stack) console.error(sanitizeStack(sendErr.stack));
 
+      // If this looks like a network/connectivity error, write a debug copy to disk
+      try {
+        const networkErrorCodes = new Set(['ETIMEDOUT','ECONNREFUSED','ECONNRESET','ENOTFOUND','EHOSTUNREACH','EAI_AGAIN']);
+        const isNetworkErr = networkErrorCodes.has(errCode) || /timeout|timed out|connection timeout|connection refused|ENOTFOUND|EAI_AGAIN/i.test(sendMsg);
+        if (isNetworkErr) {
+          try {
+            const outDir = path.join(__dirname, '..', 'tmp_emails');
+            fs.mkdirSync(outDir, { recursive: true });
+            const fileName = `smtp-failed-${Date.now()}-${(Math.random()*1e9|0)}.json`;
+            const filePath = path.join(outDir, fileName);
+            const payload = { to, subject, text: text || null, html: html || null, attachments: attachments || null, createdAt: new Date().toISOString(), smtpError: sendMsg, code: errCode };
+            fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+            console.warn('SMTP send failed — debug email written to:', filePath);
+          } catch (writeErr) {
+            console.warn('Failed to write SMTP-failed debug email file', writeErr && writeErr.message ? writeErr.message : writeErr);
+          }
+        }
+      } catch (inner) { /* non-fatal */ }
+
       // Determine if this looks like a network/connectivity error (timeout, DNS, refused, reset)
       const networkErrorCodes = new Set(['ETIMEDOUT','ECONNREFUSED','ECONNRESET','ENOTFOUND','EHOSTUNREACH','EAI_AGAIN']);
       const isNetwork = networkErrorCodes.has(errCode) || /timeout|timed out|connection timeout|connection refused|ENOTFOUND|EAI_AGAIN/i.test(sendMsg);
