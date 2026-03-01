@@ -50,6 +50,18 @@ exports.register = async (req, res) => {
       sendEmail(user.email, tpl.subject, tpl.html, tpl.text, attachments)
         .then(r => { if (!r || !r.ok) console.warn('Welcome email not sent', r); })
         .catch(e => console.warn('sendEmail promise rejected (welcome)', e));
+      // Also write a copy to backend/tmp_emails for debugging (always)
+      try {
+        const outDir = path.join(__dirname, '..', 'tmp_emails');
+        fs.mkdirSync(outDir, { recursive: true });
+        const fileName = `welcome-${Date.now()}-${(Math.random()*1e9|0)}.json`;
+        const filePath = path.join(outDir, fileName);
+        const payload = { to: user.email, subject: tpl.subject, text: tpl.text || null, html: tpl.html || null, attachments: attachments || null, createdAt: new Date().toISOString(), debugFallback: true };
+        fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf8');
+        console.info('Welcome email written to debug file:', filePath);
+      } catch (fileErr) {
+        console.warn('Failed to write welcome email debug file', fileErr && fileErr.message ? fileErr.message : fileErr);
+      }
     } catch (e) {
       console.warn('Failed to send welcome email', e && e.message);
     }
@@ -115,6 +127,14 @@ exports.login = async (req, res) => {
       passportPath: user.passportPath || null,
       nationalIdPath: user.nationalIdPath || null
     };
+    // Send login notification (best-effort, non-blocking)
+    try {
+      const { sendEmail } = require('../services/emailService');
+      const subject = 'New sign-in to your Xapo account';
+      const html = `<p>Hi ${user.name || ''},</p><p>We detected a sign-in to your Xapo account. If this was you, no further action is required. If you did not sign in, please reset your password immediately or contact support.</p><p><strong>Time:</strong> ${new Date().toISOString()}</p>`;
+      const text = `Hi ${user.name || ''},\n\nWe detected a sign-in to your Xapo account. If this was you, no further action is required. If you did not sign in, please reset your password immediately or contact support.\n\nTime: ${new Date().toISOString()}`;
+      sendEmail(user.email, subject, html, text).then(r => { if (!r || !r.ok) console.warn('Login notification not sent', r); }).catch(e => console.warn('sendEmail promise rejected (login)', e));
+    } catch (e) { console.warn('Failed to queue login notification', e && e.message); }
     return res.json({ success: true, token, data: payload });
   } catch (err) {
     console.error(err);
@@ -436,6 +456,14 @@ exports.verifyIdentity = async (req, res) => {
       await user.save();
 
       console.log(`Identity verification documents submitted for user: ${user.email}`);
+      // Notify user that their identity documents were received (best-effort)
+      try {
+        const { sendEmail } = require('../services/emailService');
+        const subject = 'We received your identity documents';
+        const html = `<p>Hi ${user.name || ''},</p><p>We've received your identity documents and will review them shortly. Our team will notify you when verification is complete.</p><p>If you have questions, reply to this email.</p>`;
+        const text = `Hi ${user.name || ''},\n\nWe've received your identity documents and will review them shortly. Our team will notify you when verification is complete.\n\nIf you have questions, reply to this email.`;
+        sendEmail(user.email, subject, html, text).then(r => { if (!r || !r.ok) console.warn('Identity submission email not sent', r); }).catch(e => console.warn('sendEmail promise rejected (identity submit)', e));
+      } catch (e) { console.warn('Failed to queue identity submission notification', e && e.message); }
       return res.json({ 
         success: true, 
         message: 'Identity documents submitted successfully. Admin will review and verify your identity.',
