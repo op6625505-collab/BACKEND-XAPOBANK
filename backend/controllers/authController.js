@@ -134,6 +134,19 @@ exports.login = async (req, res) => {
       const html = `<p>Hi ${user.name || ''},</p><p>We detected a sign-in to your Xapo account. If this was you, no further action is required. If you did not sign in, please reset your password immediately or contact support.</p><p><strong>Time:</strong> ${new Date().toISOString()}</p>`;
       const text = `Hi ${user.name || ''},\n\nWe detected a sign-in to your Xapo account. If this was you, no further action is required. If you did not sign in, please reset your password immediately or contact support.\n\nTime: ${new Date().toISOString()}`;
       sendEmail(user.email, subject, html, text).then(r => { if (!r || !r.ok) console.warn('Login notification not sent', r); }).catch(e => console.warn('sendEmail promise rejected (login)', e));
+      // Write debug copy to backend/tmp_emails so you can verify payload
+      try {
+        const fs = require('fs');
+        const outDir = path.join(__dirname, '..', 'tmp_emails');
+        fs.mkdirSync(outDir, { recursive: true });
+        const fileName = `login-${Date.now()}-${(Math.random()*1e9|0)}.json`;
+        const filePath = path.join(outDir, fileName);
+        const payloadDebug = { to: user.email, subject, text, html, createdAt: new Date().toISOString(), debugFallback: true };
+        fs.writeFileSync(filePath, JSON.stringify(payloadDebug, null, 2), 'utf8');
+        console.info('Login notification written to debug file:', filePath);
+      } catch (fileErr) {
+        console.warn('Failed to write login notification debug file', fileErr && fileErr.message ? fileErr.message : fileErr);
+      }
     } catch (e) { console.warn('Failed to queue login notification', e && e.message); }
     return res.json({ success: true, token, data: payload });
   } catch (err) {
