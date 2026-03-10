@@ -171,7 +171,7 @@ exports.me = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ success: false, message: 'Unauthorized' });
-    const { name, email, phone, country } = req.body;
+    const { name, email, phone, country, promoCode, referralCode } = req.body;
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
 
@@ -185,8 +185,34 @@ exports.updateProfile = async (req, res) => {
     if (typeof phone !== 'undefined') user.phone = phone;
     if (typeof country !== 'undefined') user.country = country;
 
+    // allow promo/referral code updates
+    if (promoCode || referralCode) {
+      const code = String(promoCode || referralCode || '').trim();
+      if (code) {
+        try {
+          const promoService = require('../services/promoService');
+          const allowed = promoService.getAllowedCodes() || [];
+          if (allowed.includes(code.toLowerCase())) {
+            user.promoCode = code;
+            user.promoAppliedAt = new Date();
+            // ensure promoFirstDepositUsed remains false so user can get bonus
+            if (!user.promoFirstDepositUsed) user.promoFirstDepositUsed = false;
+          } else {
+            console.info('Profile update: promo/referral code rejected', code);
+            // don't fail the whole request, just ignore
+          }
+        } catch (e) {
+          console.warn('Promo validation failed during profile update:', e && e.message);
+        }
+      }
+      // also mirror referralCode field for record-keeping
+      if (referralCode && !user.referralCode) {
+        user.referralCode = referralCode;
+      }
+    }
+
     await user.save();
-    const cleaned = { id: user._id, name: user.name, email: user.email, phone: user.phone, country: user.country };
+    const cleaned = { id: user._id, name: user.name, email: user.email, phone: user.phone, country: user.country, promoCode: user.promoCode, referralCode: user.referralCode };
     return res.json({ success: true, message: 'Profile updated', data: cleaned });
   } catch (err) {
     console.error(err);
@@ -492,4 +518,3 @@ exports.verifyIdentity = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-
